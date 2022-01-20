@@ -104,7 +104,7 @@ function getAboveAll(steps)
     turnRight()
     local success = moveUp()
     if success == false then
-      getAboveAll(steps+1)
+      getAboveAll(steps + 1)
     end
     -- move up until there's nothing in front
     while robot.detect() == true do
@@ -136,28 +136,59 @@ function safeMoveForward()
   end
 end
 
+--- break the block above, move up two, and place it below
+function leaveBase()
+  robot.swing()
+  moveUp()
+  moveUp()
+  robot.place()
+end
+
+--- break the block below, move down two, and place it above
+--- ensure the robot is actually home before calling!!!
+function enterBase()
+  robot.swingDown()
+  moveDown()
+  moveDown()
+  robot.place()
+end
+
+function gridTurn(x)
+  if x % 2 == 1 then
+    turnLeft()
+  else
+    turnRight()
+  end
+end
+
 -- remove snow within a rectangle, where the robot is the bottom left corner
 function clearArea(width, height)
   for x = 1, width do
     for y = 1, height do
       safeMoveForward()
     end
-    if x % 2 == 1 then
-      turnLeft()
-    else
-      turnRight()
-    end
+    gridTurn(x)
     safeMoveForward()
-    if x % 2 == 1 then
-      turnLeft()
-    else
-      turnRight()
-    end
+    gridTurn(x)
   end
+  -- move back to the bottom left corner
+  gridTurn(width)
+  for x = 1, width do
+    safeMoveForward()
+  end
+  if height % 2 == 1 then
+    gridTurn(width + 1)
+    for y = 1, height do
+      safeMoveForward()
+    end
+    turnLeft()
+  end
+  -- set orientation back to start
+  turnLeft()
 end
 
 function main()
-  clearArea(10, 10)
+  clearArea(3, 3)
 end
 
 main()
