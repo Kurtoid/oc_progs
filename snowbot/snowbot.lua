@@ -138,10 +138,12 @@ end
 
 --- break the block above, move up two, and place it below
 function leaveBase()
-  robot.swing()
+robot.swingUp()
+
   moveUp()
   moveUp()
-  robot.place()
+robot.placeDown()
+
 end
 
 --- break the block below, move down two, and place it above
@@ -150,7 +152,8 @@ function enterBase()
   robot.swingDown()
   moveDown()
   moveDown()
-  robot.place()
+robot.placeUp()
+
 end
 
 function gridTurn(x)
@@ -187,8 +190,54 @@ function clearArea(width, height)
   turnLeft()
 end
 
+--- use safeMoveForward to move by the specified offset, maintaining the current orientation
+function goToOffset(x, y)
+  if x < 0 then
+    -- face west
+    turnLeft()
+  end
+  if x > 0 then
+    -- face east
+    turnRight()
+  end
+  for i = 1, math.abs(x) do
+    safeMoveForward()
+  end
+  -- reset orientation
+  if x < 0 then
+    turnRight()
+  end
+  if x > 0 then
+    turnLeft()
+  end
+
+  if y < 0 then
+    -- face north
+  end
+  if y > 0 then
+    -- face south
+    turnLeft()
+    turnLeft()
+  end
+
+  for i = 1, math.abs(y) do
+    safeMoveForward()
+  end
+  -- reset orientation
+  if y > 0 then
+    turnRight()
+    turnRight()
+  end
+end
+
 function main()
+leaveBase()
+goToOffset(-5, -5)
+
   clearArea(3, 3)
+goToOffset(5, 5)
+enterBase()
+
 end
 
 main()
