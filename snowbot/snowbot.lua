@@ -65,7 +65,8 @@ function isOnGround()
 end
 
 function isAboveAll()
-  return geolyzer.canSeeSky()
+  return geolyzer.canSeeSky() and robot.detectUp() == false
+
 end
 
 function isAtCeiling()
@@ -124,10 +125,21 @@ end
 function safeMoveForward()
   if robot.detect() == true then
     while robot.detect() == true do
+      if robot.detectUp() == true then
+        -- this can happen if there is a transparent block above us that getAboveAll didn't see last move
+        getAboveAll()
+      end
+
       moveUp()
+
     end
   end
-  forward()
+  -- after all that, forward() can still fail because
+  -- a player or mob could walk in front between the check above and now
+  -- But, if it does fail, it's only a temporary obstacle, so keep trying
+  while forward() == false do
+  end
+
   getAboveAll()
   if robot.detectDown() == false then
     while robot.detectDown() == false do
@@ -138,11 +150,11 @@ end
 
 --- break the block above, move up two, and place it below
 function leaveBase()
-robot.swingUp()
+  robot.swingUp()
 
   moveUp()
   moveUp()
-robot.placeDown()
+  robot.placeDown()
 
 end
 
@@ -152,7 +164,7 @@ function enterBase()
   robot.swingDown()
   moveDown()
   moveDown()
-robot.placeUp()
+  robot.placeUp()
 
 end
 
@@ -231,12 +243,14 @@ function goToOffset(x, y)
 end
 
 function main()
-leaveBase()
-goToOffset(-5, -5)
+  leaveBase()
 
-  clearArea(3, 3)
-goToOffset(5, 5)
-enterBase()
+  goToOffset(-45, -45)
+
+  clearArea(20, 20)
+  goToOffset(45, 45)
+
+  enterBase()
 
 end
 
