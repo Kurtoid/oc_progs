@@ -31,13 +31,6 @@ function scan_single_geolyzer(geolyzer)
   return data
 end
 
-function scan_and_show_test()
-  local data = scan_single_geolyzer(geo)
-  hologram.clear()
-  show_hologram(data)
-  os.sleep()
-end
-
 function scan_and_send(from, port)
   print('scanning')
   -- TODO: use all geolyzers

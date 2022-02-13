@@ -157,17 +157,17 @@ function add_map(map)
 end
 
 function get_known_bounds()
-  local known_bounds = {x = {0, 0}, y = {0, 0}, z = {0, 0}}
+  local known_bounds = {x = {nil, nil}, y = {nil, nil}, z = {nil, nil}}
   for i, map in ipairs(geolyzers) do
     local bounds = map['bounds']
     -- for each dimension
     for dim, bounds_dim in pairs(bounds) do
       -- for each bound
       for i, bound in ipairs(bounds_dim) do
-        if known_bounds[dim][1] > bound then
+        if known_bounds[dim][1] == nil or known_bounds[dim][1] > bound then
           known_bounds[dim][1] = bound
         end
-        if known_bounds[dim][2] < bound then
+        if known_bounds[dim][2] == nil or known_bounds[dim][2] < bound then
           known_bounds[dim][2] = bound
         end
       end
@@ -186,25 +186,19 @@ function display_known_maps()
   local x_range = bounds['x'][2] - bounds['x'][1]
   local y_range = bounds['y'][2] - bounds['y'][1]
   local z_range = bounds['z'][2] - bounds['z'][1]
+  local max_xz_range = math.max(x_range, z_range)
   local x_offset = bounds['x'][1]
   local y_offset = bounds['y'][1]
   local z_offset = bounds['z'][1]
   print(bounds['x'][1], bounds['x'][2], bounds['y'][1], bounds['y'][2], bounds['z'][1], bounds['z'][2])
   for x = 1, 48 do
-    -- holo_data[x] = {}
-    print('drawing row ', x)
     for z = 1, 48 do
-      -- holo_data[x][z] = {}
       for y = 1, 32 do
-        local x_pos = ((x - 1) * x_range / 48.0) + x_offset
-        local z_pos = ((z - 1) * z_range / 48.0) + z_offset
+        local x_pos = ((x - 1) * max_xz_range / 48.0) + x_offset
+        local z_pos = ((z - 1) * max_xz_range / 48.0) + z_offset
         local y_pos = ((y - 1) * y_range / 32.0) + y_offset
         local blk = get_block(x_pos, y_pos, z_pos)
-        -- set hologram if blk ~= clear or unmapped
         local show_block = blk ~= BLK_CLEAR and blk ~= BLK_UNMAPPED
-        if blk == BLK_UNMAPPED then
-          print('unmapped: ', x_pos, y_pos, z_pos)
-        end
         hologram.set(x, y, z, show_block)
         if computer.energy() / computer.maxEnergy() < 0.2 then
           os.sleep(1)
@@ -212,7 +206,6 @@ function display_known_maps()
       end
     end
   end
-
 end
 
 -- END HOLO FUNCTIONS
@@ -238,11 +231,16 @@ function msg_recieve(_, from, port, data)
   end
   if packet['type'] == "single_scan" then
     print("got data")
-    add_map(packet['map'])
-    local result = xpcall(display_known_maps, function(err)
+    -- add_map(packet['map'])
+    xpcall(add_map, function(err)
       print(err)
-      print(debug.traceback())
-    end)
+    end, packet['map'])
+    if #geolyzers > 1 then
+      local result = xpcall(display_known_maps, function(err)
+        print(err)
+        print(debug.traceback())
+      end)
+    end
   end
 end
 
@@ -260,6 +258,5 @@ function main()
   print("interrupted")
   for i, handler in ipairs(event_handlers) do
     event.cancel(handler)
-  end
 end
 main()
