@@ -12,7 +12,7 @@ local BLK_BLOCKED = 1
 local BLK_UNMAPPED = 2
 
 function is_blocked(blk)
-  if blk == BLK_BLOCKED or blk == BLK_UNMAPPED then
+  if blk ~= BLK_CLEAR then
     return true
   end
   return false
@@ -69,76 +69,197 @@ function manhattan_dist(start_pos, end_pos)
   return math.abs(start_pos[1] - end_pos[1]) + math.abs(start_pos[2] - end_pos[2]) + math.abs(start_pos[3] - end_pos[3])
 end
 
-function get_best_from_open_set(open_set)
-  local best_dist = math.huge
-  local best_node = nil
-  for i, node in ipairs(open_set) do
-    local dist = manhattan_dist(node.pos, node.goal)
-    if dist < best_dist then
-      best_dist = dist
-      best_node = node
-    end
-  end
-  return best_node
-end
+-- A STAR CODE -- 
 
 function reconstruct_path(came_from, current_node)
   local path = {}
   while current_node do
     table.insert(path, current_node)
-    current_node = came_from[current_node.pos]
+    current_node = came_from[current_node]
   end
-  return path
+  -- reverse the path
+  local path_rev = {}
+  for i = #path, 1, -1 do
+    table.insert(path_rev, path[i])
+  end
+  return path_rev
 end
 
 function get_neighbors(pos)
   local neighbors = {}
-  for i = -1, 1 do
-    for j = -1, 1 do
-      for k = -1, 1 do
-        if i == 0 and j == 0 and k == 0 then
-          -- don't include self
-        else
-          table.insert(neighbors, {x = pos[1] + i, y = pos[2] + j, z = pos[3] + k})
-        end
-      end
+  local dx = {-1, 1, 0, 0, 0, 0}
+  local dy = {0, 0, -1, 1, 0, 0}
+  local dz = {0, 0, 0, 0, -1, 1}
+  for i = 1, 6 do
+    local nx = pos[1] + dx[i]
+    local ny = pos[2] + dy[i]
+    local nz = pos[3] + dz[i]
+    if get_block(nx, ny, nz) == BLK_CLEAR then
+      table.insert(neighbors, {nx, ny, nz})
     end
   end
   return neighbors
 end
 
+function table_contains(table, element)
+  for i, e in ipairs(table) do
+    if e[1] == element[1] and e[2] == element[2] and e[3] == element[3] then
+      return true
+    end
+  end
+  return false
+end
+
+function index_of(table, element)
+  for i, e in ipairs(table) do
+    if e[1] == element[1] and e[2] == element[2] and e[3] == element[3] then
+      return i
+    end
+  end
+  return -1
+end
+
 function a_star(start_pos, end_pos)
-  local open_set = {}
   local closed_set = {}
+  local open_set = {}
+  local came_from = {}
   local g_score = {}
   local f_score = {}
-  local came_from = {}
-  local start_node = {pos = start_pos, g_score = 0, f_score = manhattan_dist(start_pos, end_pos)}
+  local start_node = {start_pos[1], start_pos[2], start_pos[3]}
+  local end_node = {end_pos[1], end_pos[2], end_pos[3]}
   table.insert(open_set, start_node)
-  g_score[start_pos] = 0
-  f_score[start_pos] = start_node.f_score
+  g_score[start_node] = 0
+  f_score[start_node] = manhattan_dist(start_node, end_node)
   while #open_set > 0 do
-    local current = get_best_from_open_set(open_set)
-    if current.pos[1] == end_pos[1] and current.pos[2] == end_pos[2] and current.pos[3] == end_pos[3] then
-      return reconstruct_path(came_from, current.pos)
+    local current = open_set[1]
+    for i, node in ipairs(open_set) do
+      if f_score[node] < f_score[current] then
+        current = node
+      end
     end
-    table.remove(open_set, 1)
-    table.insert(closed_set, current.pos)
-    local neighbors = get_neighbors(current.pos)
+    if current[1] == end_node[1] and current[2] == end_node[2] and current[3] == end_node[3] then
+      return reconstruct_path(came_from, current)
+    end
+    table.remove(open_set, index_of(open_set, current))
+    table.insert(closed_set, current)
+    local neighbors = get_neighbors(current)
     for i, neighbor in ipairs(neighbors) do
-      if not is_blocked(get_block(neighbor[1], neighbor[2], neighbor[3])) then
-        local tentative_g_score = g_score[current.pos] + 1
-        if not g_score[neighbor] or tentative_g_score < g_score[neighbor] then
-          came_from[neighbor] = current.pos
-          g_score[neighbor] = tentative_g_score
-          f_score[neighbor] = g_score[neighbor] + manhattan_dist(neighbor, end_pos)
-          local node = {pos = neighbor, g_score = g_score[neighbor], f_score = f_score[neighbor]}
-          table.insert(open_set, node)
+      if not table_contains(closed_set, neighbor) then
+        local tentative_g_score = g_score[current] + 1
+        if not table_contains(open_set, neighbor) then
+          table.insert(open_set, neighbor)
+        elseif g_score[neighbor] ~= nil and tentative_g_score >= g_score[neighbor] then
+          goto continue
+        end
+        came_from[neighbor] = current
+        g_score[neighbor] = tentative_g_score
+        f_score[neighbor] = g_score[neighbor] + manhattan_dist(neighbor, end_node)
+      end
+      ::continue::
+    end
+  end
+  return nil
+end
+-- END A STAR CODE --
+
+-- SURFACE TSP CODE --
+--- get a list of all the sky-facing blocks within the selected bounds
+function top_blocks_for_bounds(bounds)
+  print("getting top blocks for bounds")
+  print(bounds['x'][1], bounds['x'][2], bounds['y'][1], bounds['y'][2], bounds['z'][1], bounds['z'][2])
+  local top_blocks = {}
+  -- for each column within the bounds
+  for x = bounds['x'][1], bounds['x'][2] do
+    -- for each row within the bounds
+    for z = bounds['z'][1], bounds['z'][2] do
+      -- for each block within the bounds
+      for y = bounds['y'][2] - 1, bounds['y'][1], -1 do
+        local blk = get_block(x, y, z)
+        -- if the top block is impassable, skip it
+        if y == bounds['y'][2] and is_blocked(blk) then
+          break
+        end
+        -- if the block is impassable, add it to the list and break for this column
+        if is_blocked(blk) then
+          print('top block: ' .. x .. ' ' .. y + 1 .. ' ' .. z)
+          table.insert(top_blocks, {x, y + 1, z})
+          break
         end
       end
     end
   end
+  return top_blocks
 end
+
+function cost_matrix(top_blocks)
+  local cost_matrix = {}
+  for i, block1 in ipairs(top_blocks) do
+    cost_matrix[i] = {}
+    for j, block2 in ipairs(top_blocks) do
+      if i == j then
+        cost_matrix[i][j] = math.huge
+        goto cost_mat_continue
+      end
+      if manhattan_dist(block1, block2) == 1 then
+        cost_matrix[i][j] = 1
+        goto cost_mat_continue
+      end
+      -- if we reach this point, just set the cost to the distance
+      cost_matrix[i][j] = manhattan_dist(block1, block2)
+      ::cost_mat_continue::
+    end
+  end
+  return cost_matrix
+end
+
+function nearest_neighbor_tsp(top_blocks, cost_mat)
+  local path = {}
+  local visited = {}
+  table.insert(path, {1, 0})
+  visited[1] = true
+  while #visited < #top_blocks do
+    local nearest = nil
+    local nearest_cost = math.huge
+    for i, block in ipairs(top_blocks) do
+      if not visited[i] then
+        local cost = cost_mat[path[#path][1]][i]
+        if cost == nil then
+          cost = math.huge
+        end
+        if cost < nearest_cost then
+          nearest = i
+          nearest_cost = cost
+        end
+      end
+    end
+    table.insert(path, {nearest, nearest_cost})
+    visited[nearest] = true
+  end
+  local pt_path = {}
+  for i = 1, #path do
+    table.insert(pt_path, top_blocks[path[i][1]])
+  end
+  return pt_path
+end
+-- 
+function fill_path(path)
+  local new_path = {}
+  for i, block in ipairs(path) do
+    if i == #path then
+      -- don't do the last block, since we'd run out of bounds
+      break
+    end
+    -- run a_star between i and i+1, and add the result to the new path
+    print("running a_star on ", i)
+    local new_path_part = a_star(block, path[i + 1])
+    for j, block in ipairs(new_path_part) do
+      table.insert(new_path, block)
+    end
+  end
+  return new_path
+end
+
+-- END TSP CODE --
 
 function add_map(map)
   -- check if any geolyser has the same name
@@ -200,6 +321,7 @@ function display_known_maps()
         local blk = get_block(x_pos, y_pos, z_pos)
         local show_block = blk ~= BLK_CLEAR and blk ~= BLK_UNMAPPED
         hologram.set(x, y, z, show_block)
+        os.sleep()
         if computer.energy() / computer.maxEnergy() < 0.2 then
           os.sleep(1)
         end
@@ -208,40 +330,54 @@ function display_known_maps()
   end
 end
 
+function pathfinding_demo()
+  local bounds = get_known_bounds()
+  local top_blocks = top_blocks_for_bounds(bounds)
+  -- DEBUG: print top blocks
+  local cost_mat = cost_matrix(top_blocks)
+  local path = nearest_neighbor_tsp(top_blocks, cost_mat)
+  local new_path = fill_path(path)
+  print('path: ')
+  for i, block in ipairs(new_path) do
+    print(block[1], block[2], block[3])
+  end
+  -- DEBUG: save the path to a file
+  local file = io.open('path.txt', 'w')
+  for i, block in ipairs(new_path) do
+    file:write(block[1], ' ', block[2], ' ', block[3], '\n')
+  end
+  file:close()
+end
+
 -- END HOLO FUNCTIONS
 local host_packets = {}
 function msg_recieve(_, from, port, data)
-  local packet = ser.unserialize(data)
-  if not packet then
-    -- this might be a fragment
-    if (host_packets[from] == nil) then
-      host_packets[from] = data
-    else
-      host_packets[from] = host_packets[from] .. data
-      local try_deser = ser.unserialize(host_packets[from])
-      if (try_deser) then
-        packet = try_deser
-        -- remove the packet from the queue
-        host_packets[from] = nil
+  xpcall(function()
+    if port == 2 and data == 'open_block_stream' then
+      print('opening stream from ', from)
+      local stream = mt.open(from, 3)
+      local message = ''
+      local chunk = ''
+      while chunk ~= 'EOF' do
+        chunk = stream:read(1024)
+        os.sleep()
+        if chunk ~= 'EOF' then
+          message = message .. chunk
+          -- print("got chunk: ", chunk)
+        end
       end
+      print('got message')
+      stream:close()
+      print('closed stream')
+      local packet = ser.unserialize(message)
+      add_map(packet['map'])
+      pathfinding_demo()
+      -- display_known_maps()
     end
-  end
-  for k, v in pairs(packet) do
-    print(k) -- ,v)
-  end
-  if packet['type'] == "single_scan" then
-    print("got data")
-    -- add_map(packet['map'])
-    xpcall(add_map, function(err)
-      print(err)
-    end, packet['map'])
-    if #geolyzers > 1 then
-      local result = xpcall(display_known_maps, function(err)
-        print(err)
-        print(debug.traceback())
-      end)
-    end
-  end
+  end, function(err)
+    print('error: ', err)
+    print(debug.traceback())
+  end)
 end
 
 function send_scan_request()
@@ -258,5 +394,6 @@ function main()
   print("interrupted")
   for i, handler in ipairs(event_handlers) do
     event.cancel(handler)
+  end
 end
 main()
