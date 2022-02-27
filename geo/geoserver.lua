@@ -321,7 +321,8 @@ function display_known_maps()
         local blk = get_block(x_pos, y_pos, z_pos)
         local show_block = blk ~= BLK_CLEAR and blk ~= BLK_UNMAPPED
         hologram.set(x, y, z, show_block)
-        os.sleep()
+-- os.sleep()
+
         if computer.energy() / computer.maxEnergy() < 0.2 then
           os.sleep(1)
         end
@@ -333,7 +334,8 @@ end
 function pathfinding_demo()
   local bounds = get_known_bounds()
   local top_blocks = top_blocks_for_bounds(bounds)
-  -- DEBUG: print top blocks
+print("top blocks: ", #top_blocks)
+
   local cost_mat = cost_matrix(top_blocks)
   local path = nearest_neighbor_tsp(top_blocks, cost_mat)
   local new_path = fill_path(path)
@@ -358,12 +360,17 @@ function msg_recieve(_, from, port, data)
       local stream = mt.open(from, 3)
       local message = ''
       local chunk = ''
-      while chunk ~= 'EOF' do
-        chunk = stream:read(1024)
+      while true do
+        chunk = stream:read("*a")
+
         os.sleep()
-        if chunk ~= 'EOF' then
-          message = message .. chunk
-          -- print("got chunk: ", chunk)
+        message = message .. chunk
+        -- check if the last 3 characters are 'EOF'
+        if #message >= 3 and string.sub(message, #message - 2, #message) == 'EOF' then
+          -- remove the 'EOF'
+          message = message:sub(1, #message - 3)
+          -- exit loop
+          break
         end
       end
       print('got message')
@@ -372,7 +379,8 @@ function msg_recieve(_, from, port, data)
       local packet = ser.unserialize(message)
       add_map(packet['map'])
       pathfinding_demo()
-      -- display_known_maps()
+display_known_maps()
+
     end
   end, function(err)
     print('error: ', err)

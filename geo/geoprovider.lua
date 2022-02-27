@@ -5,7 +5,7 @@ local mt = require("minitel")
 local event = require("event")
 local ser = require("serialization")
 
-local geo_range = 4 -- for now
+local geo_range = 9 -- for now
 local geo_vert_range = 32
 
 local geolyzers = {}
@@ -45,15 +45,12 @@ function scan_and_send(from, port)
                    map = {data = data, bounds = geolyser_bounds, location = geolyzer_location, name = hostname}}
   print('serializing')
   message = ser.serialize(message)
+  print('serialized to ' .. #message .. ' bytes')
   print('opening stream')
   mt.send('geo_server', 2, 'open_block_stream')
   local stream = mt.listen(3)
   print('sending')
-  -- write message in 1024 byte chunks
-  for i = 1, #message, 1024 do
-    local stop_pos = math.min(i + 1024-1, #message)
-    stream:write(message:sub(i, stop_pos))
-  end
+  stream:write(message)
   stream:write("EOF")
   print('closing stream')
   stream:close()
@@ -79,7 +76,12 @@ end
 function main()
   table.insert(event_handlers, event.listen("net_msg", msg_recieve))
   table.insert(event_handlers, event.listen("net_broadcast", msg_recieve))
-  scan_and_send("geo_server", 1)
+  xpcall(function()
+    scan_and_send("geo_server", 1)
+  end, function(err)
+    print(err)
+    print(debug.traceback())
+  end)
   -- wait forever for an interrupt signal
   local result = event.pull("interrupted")
   print("interrupted")
