@@ -235,7 +235,7 @@ function fill_path(path)
     end
     -- run a_star between i and i+1, and add the result to the new path
     -- print("running a_star on ", i)
-    if block == nil or path[i+1] == nil then
+    if block == nil or path[i + 1] == nil then
       print("block or next block is nil")
       break
     end
@@ -246,6 +246,10 @@ function fill_path(path)
       current_path = {}
     else
       for j, block in ipairs(new_path_part) do
+        if j == #new_path_part then
+          break
+        end
+
         table.insert(current_path, block)
       end
     end

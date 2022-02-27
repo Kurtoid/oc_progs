@@ -31,7 +31,8 @@ function scan_single_geolyzer(geolyzer)
       for y = 1, #scan_result do
         local block = scan_result[y]
         if block ~= 0 then
-          octree:set(x + geo_range, y, z + geo_range)
+          octree:set(x + geo_range, y, z + geo_range, 1)
+
         end
       end
 
