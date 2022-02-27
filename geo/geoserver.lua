@@ -4,12 +4,13 @@ local event = require("event")
 local ser = require("serialization")
 local mt = require("minitel")
 local computer = require("computer")
+require("octree")
 
 local geolyzers = {}
 
 local BLK_CLEAR = 0
 local BLK_BLOCKED = 1
-local BLK_UNMAPPED = 2
+local BLK_UNMAPPED = -1
 
 function is_blocked(blk)
   if blk ~= BLK_CLEAR then
@@ -57,8 +58,12 @@ function get_block(x, y, z)
     local z = z - map['bounds']['z'][1]
     -- print(x, y, z)
     -- print(map['data'][x][z][y])
-    local blk = map['data'][x][z][y]
-    if blk ~= BLK_CLEAR then
+    if x == nil or z == nil or y == nil then
+      return BLK_UNMAPPED
+    end
+    local blk = map['data']:get(x, y, z)
+
+    if blk ~= BLK_CLEAR and blk ~= nil then
       return blk
     end
   end
@@ -175,14 +180,12 @@ function top_blocks_for_bounds(bounds)
       -- for each block within the bounds
       for y = bounds['y'][2] - 1, bounds['y'][1], -1 do
         local blk = get_block(x, y, z)
-        -- if the top block is impassable, skip it
-        if y == bounds['y'][2] and is_blocked(blk) then
-          break
-        end
-        -- if the block is impassable, add it to the list and break for this column
-        if is_blocked(blk) then
-          print('top block: ' .. x .. ' ' .. y + 1 .. ' ' .. z)
-          table.insert(top_blocks, {x, y + 1, z})
+        -- if block is solid and not unmapped
+        if blk ~= BLK_CLEAR and blk ~= BLK_UNMAPPED then
+          -- if block above is not unmapped
+          if get_block(x, y + 1, z) ~= BLK_UNMAPPED then
+            table.insert(top_blocks, {x, y + 1, z})
+          end
           break
         end
       end
@@ -191,28 +194,7 @@ function top_blocks_for_bounds(bounds)
   return top_blocks
 end
 
-function cost_matrix(top_blocks)
-  local cost_matrix = {}
-  for i, block1 in ipairs(top_blocks) do
-    cost_matrix[i] = {}
-    for j, block2 in ipairs(top_blocks) do
-      if i == j then
-        cost_matrix[i][j] = math.huge
-        goto cost_mat_continue
-      end
-      if manhattan_dist(block1, block2) == 1 then
-        cost_matrix[i][j] = 1
-        goto cost_mat_continue
-      end
-      -- if we reach this point, just set the cost to the distance
-      cost_matrix[i][j] = manhattan_dist(block1, block2)
-      ::cost_mat_continue::
-    end
-  end
-  return cost_matrix
-end
-
-function nearest_neighbor_tsp(top_blocks, cost_mat)
+function nearest_neighbor_tsp(top_blocks)
   local path = {}
   local visited = {}
   table.insert(path, {1, 0})
@@ -222,7 +204,8 @@ function nearest_neighbor_tsp(top_blocks, cost_mat)
     local nearest_cost = math.huge
     for i, block in ipairs(top_blocks) do
       if not visited[i] then
-        local cost = cost_mat[path[#path][1]][i]
+        -- local cost = cost_mat[path[#path][1]][i]
+        local cost = manhattan_dist(top_blocks[path[#path][1]], block)
         if cost == nil then
           cost = math.huge
         end
@@ -243,25 +226,42 @@ function nearest_neighbor_tsp(top_blocks, cost_mat)
 end
 -- 
 function fill_path(path)
-  local new_path = {}
+  local paths = {}
+  local current_path = {}
   for i, block in ipairs(path) do
     if i == #path then
       -- don't do the last block, since we'd run out of bounds
       break
     end
     -- run a_star between i and i+1, and add the result to the new path
-    print("running a_star on ", i)
+    -- print("running a_star on ", i)
+    if block == nil or path[i+1] == nil then
+      print("block or next block is nil")
+      break
+    end
     local new_path_part = a_star(block, path[i + 1])
-    for j, block in ipairs(new_path_part) do
-      table.insert(new_path, block)
+    if new_path_part == nil then
+      -- print("breaking path into chunks")
+      table.insert(paths, current_path)
+      current_path = {}
+    else
+      for j, block in ipairs(new_path_part) do
+        table.insert(current_path, block)
+      end
     end
   end
-  return new_path
+  if #current_path > 0 then
+    table.insert(paths, current_path)
+  end
+  return paths
 end
 
 -- END TSP CODE --
 
 function add_map(map)
+  -- map['data'] is a serialized octree
+  map['data'] = new_octree_from_root(map['data'])
+
   -- check if any geolyser has the same name
   -- if so, replace it. otherwise, add it
   local found = false
@@ -275,6 +275,7 @@ function add_map(map)
   if not found then
     table.insert(geolyzers, map)
   end
+  print("total maps: " .. #geolyzers)
 end
 
 function get_known_bounds()
@@ -321,7 +322,7 @@ function display_known_maps()
         local blk = get_block(x_pos, y_pos, z_pos)
         local show_block = blk ~= BLK_CLEAR and blk ~= BLK_UNMAPPED
         hologram.set(x, y, z, show_block)
--- os.sleep()
+        -- os.sleep()
 
         if computer.energy() / computer.maxEnergy() < 0.2 then
           os.sleep(1)
@@ -334,19 +335,17 @@ end
 function pathfinding_demo()
   local bounds = get_known_bounds()
   local top_blocks = top_blocks_for_bounds(bounds)
-print("top blocks: ", #top_blocks)
-
-  local cost_mat = cost_matrix(top_blocks)
-  local path = nearest_neighbor_tsp(top_blocks, cost_mat)
-  local new_path = fill_path(path)
-  print('path: ')
-  for i, block in ipairs(new_path) do
-    print(block[1], block[2], block[3])
-  end
+  print("top blocks: ", #top_blocks)
+  local path = nearest_neighbor_tsp(top_blocks)
+  local new_paths = fill_path(path)
+  print("found paths: ", #new_paths)
   -- DEBUG: save the path to a file
   local file = io.open('path.txt', 'w')
-  for i, block in ipairs(new_path) do
-    file:write(block[1], ' ', block[2], ' ', block[3], '\n')
+  for path_index, path in ipairs(new_paths) do
+    for i, block in ipairs(path) do
+      file:write(block[1], ' ', block[2], ' ', block[3], '\n')
+    end
+    file:write('\n')
   end
   file:close()
 end
@@ -378,8 +377,8 @@ function msg_recieve(_, from, port, data)
       print('closed stream')
       local packet = ser.unserialize(message)
       add_map(packet['map'])
+      display_known_maps()
       pathfinding_demo()
-display_known_maps()
 
     end
   end, function(err)

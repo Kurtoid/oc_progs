@@ -4,6 +4,7 @@ local computer = require("computer")
 local mt = require("minitel")
 local event = require("event")
 local ser = require("serialization")
+require("octree")
 
 local geo_range = 9 -- for now
 local geo_vert_range = 32
@@ -19,16 +20,24 @@ local geolyser_bounds = {x = {geolyzer_location['x'] - geo_range, geolyzer_locat
                          z = {geolyzer_location['z'] - geo_range, geolyzer_location['z'] + geo_range}}
 
 function scan_single_geolyzer(geolyzer)
-  local data = {}
+  local octree = new_octree()
+
   for x = -geo_range, geo_range do
-    data[x + geo_range] = {}
     print('row ' .. x)
     for z = -geo_range, geo_range do
       -- scan the whole column
-      data[x + geo_range][z + geo_range] = geolyzer.scan(x, z)
+      -- data[x + geo_range][z + geo_range] = geolyzer.scan(x, z)
+      local scan_result = geolyzer.scan(x, z)
+      for y = 1, #scan_result do
+        local block = scan_result[y]
+        if block ~= 0 then
+          octree:set(x + geo_range, y, z + geo_range)
+        end
+      end
+
     end
   end
-  return data
+  return octree
 end
 
 function dump_map_to_file(map)
