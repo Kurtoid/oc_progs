@@ -30,9 +30,8 @@ function scan_single_geolyzer(geolyzer)
       local scan_result = geolyzer.scan(x, z)
       for y = 1, #scan_result do
         local block = scan_result[y]
-        if block ~= 0 then
+        if block >0.1 then
           octree:set(x + geo_range, y, z + geo_range, 1)
-
         end
       end
 
@@ -59,6 +58,10 @@ function scan_and_send(from, port)
   print('opening stream')
   mt.send('geo_server', 2, 'open_block_stream')
   local stream = mt.listen(3)
+  if stream == nil then
+    -- TODO: does listen ever time out?
+    print('didn\'t get connection from main')
+  end
   print('sending')
   stream:write(message)
   stream:write("EOF")
@@ -73,14 +76,15 @@ local event_handlers = {}
 local host_packets = {}
 
 function msg_recieve(event, from, port, data)
-  -- TODO: validate
   print("msg rec")
-  local packet = ser.unserialize(data)
-  if (not packet) then
-    return
-  end
-  if packet['action'] == 'scan' then
-    scan_and_send(from, port)
+  if port == 1 then
+    local packet = ser.unserialize(data)
+    if (not packet) then
+      return
+    end
+    if packet['action'] == 'scan' then
+      scan_and_send(from, port)
+    end
   end
 end
 function main()

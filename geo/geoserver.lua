@@ -70,6 +70,24 @@ function get_block(x, y, z)
   return BLK_CLEAR
 end
 
+function clear_block(x, y, z)
+  local maps = get_maps_for_point(x, y, z)
+  if #maps == 0 then
+    return
+  end
+  for i, map in ipairs(maps) do
+    local x = x - map['bounds']['x'][1]
+    local y = y - map['bounds']['y'][1]
+    local z = z - map['bounds']['z'][1]
+    -- print(x, y, z)
+    -- print(map['data'][x][z][y])
+    if x == nil or z == nil or y == nil then
+      return
+    end
+    map['data']:set(x, y, z, BLK_CLEAR)
+  end
+end
+
 function manhattan_dist(start_pos, end_pos)
   return math.abs(start_pos[1] - end_pos[1]) + math.abs(start_pos[2] - end_pos[2]) + math.abs(start_pos[3] - end_pos[3])
 end
@@ -99,7 +117,7 @@ function get_neighbors(pos)
     local nx = pos[1] + dx[i]
     local ny = pos[2] + dy[i]
     local nz = pos[3] + dz[i]
-    if get_block(nx, ny, nz) == BLK_CLEAR then
+    if get_block(nx, ny, nz) <= BLK_CLEAR then
       table.insert(neighbors, {nx, ny, nz})
     end
   end
@@ -192,6 +210,18 @@ function top_blocks_for_bounds(bounds)
     end
   end
   return top_blocks
+end
+
+function top_block_for_xz(x, z)
+  local bounds = get_known_bounds()
+  for y = bounds['y'][2] - 1, bounds['y'][1], -1 do
+    local blk = get_block(x, y, z)
+    if blk ~= BLK_CLEAR and blk ~= BLK_UNMAPPED then
+      if get_block(x, y + 1, z) ~= BLK_UNMAPPED then
+        return y + 1
+      end
+    end
+  end
 end
 
 function nearest_neighbor_tsp(top_blocks)
@@ -336,6 +366,36 @@ function display_known_maps()
   end
 end
 
+
+function load_state()
+  -- read from GEO_DATA.dat, if it exists
+  local file = io.open('GEO_DATA.dat', 'r')
+  if file then
+    local serialized_geolysers = file:read("*a")
+    file:close()
+    geolyzers = ser.unserialize(serialized_geolysers)
+    if geolyzers == nil then
+      geolyzers = {}
+    else
+      for i, map in ipairs(geolyzers) do
+        map['data'] = new_octree_from_root(map['data'])
+      end
+    end
+    print("read state from file")
+  end
+end
+
+function save_state()
+  -- write to GEO_DATA.dat
+  local file = io.open('GEO_DATA.dat', 'w')
+  if file then
+    print("writing state to file")
+    file:write(ser.serialize(geolyzers))
+    file:close()
+    print("wrote state to file")
+  end
+end
+
 function pathfinding_demo()
   local bounds = get_known_bounds()
   local top_blocks = top_blocks_for_bounds(bounds)
@@ -355,35 +415,80 @@ function pathfinding_demo()
 end
 
 -- END HOLO FUNCTIONS
+function read_block_stream(from)
+  print('opening stream from ', from)
+  local stream = mt.open(from, 3)
+  local message = ''
+  local chunk = ''
+  while true do
+    chunk = stream:read("*a")
+    os.sleep()
+    message = message .. chunk
+    -- check if the last 3 characters are 'EOF'
+    if #message >= 3 and string.sub(message, #message - 2, #message) == 'EOF' then
+      -- remove the 'EOF'
+      message = message:sub(1, #message - 3)
+      -- exit loop
+      break
+    end
+  end
+  print('got message')
+  stream:close()
+  print('closed stream')
+  local packet = ser.unserialize(message)
+  add_map(packet['map'])
+  -- save_state()
+  display_known_maps()
+  -- pathfinding_demo()
+end
+
+function handle_nav_request(packet, from)
+  local start_pos = packet['start_pos']
+  local end_pos = packet['end_pos']
+  local path = nil
+  local error_message = nil
+  -- the y position for end_pos is optional - if so, get the corresponding top block for that xz
+  if end_pos.y == nil then
+    end_pos.y = top_block_for_xz(end_pos.x, end_pos.z)
+    if end_pos.y == nil then
+      error_message = 'no top block for xz'
+      goto error
+    end
+  end
+  print("planning from ", start_pos.x, start_pos.y, start_pos.z, " to ", end_pos.x, end_pos.y, end_pos.z)
+  -- geolysers might consider the robot to be a block, so clear the robot's position
+  clear_block(start_pos.x, start_pos.y, start_pos.z)
+  -- clear the end position
+  clear_block(end_pos.x, end_pos.y, end_pos.z)
+  path = a_star({start_pos.x, start_pos.y, start_pos.z}, {end_pos.x, end_pos.y, end_pos.z})
+  -- the path could be very large, so send it over a stream
+  -- the client should be listening
+  ::error::
+  local stream = mt.open(from, 3)
+  if stream == nil then
+    print('could not open stream to ', from)
+  end
+  local message = ser.serialize({path = path, error_message = error_message})
+  message = message .. 'EOF'
+  stream:write(message)
+  stream:close()
+  print("path sent to ", from, ": ", #path)
+end
+
 local host_packets = {}
 function msg_recieve(_, from, port, data)
   xpcall(function()
     if port == 2 and data == 'open_block_stream' then
-      print('opening stream from ', from)
-      local stream = mt.open(from, 3)
-      local message = ''
-      local chunk = ''
-      while true do
-        chunk = stream:read("*a")
-
-        os.sleep()
-        message = message .. chunk
-        -- check if the last 3 characters are 'EOF'
-        if #message >= 3 and string.sub(message, #message - 2, #message) == 'EOF' then
-          -- remove the 'EOF'
-          message = message:sub(1, #message - 3)
-          -- exit loop
-          break
-        end
+      read_block_stream(from)
+    elseif port == 2 then
+      local packet = ser.unserialize(data)
+      -- throw away unreadable packets
+      if packet == nil then
+        return
       end
-      print('got message')
-      stream:close()
-      print('closed stream')
-      local packet = ser.unserialize(message)
-      add_map(packet['map'])
-      display_known_maps()
-      pathfinding_demo()
-
+      if packet['type'] == 'nav_request' then
+        handle_nav_request(packet, from)
+      end
     end
   end, function(err)
     print('error: ', err)
@@ -396,11 +501,13 @@ function send_scan_request()
   msg = ser.serialize(msg)
   mt.usend("~", 1, msg)
 end
-
+ 
 local event_handlers = {}
 function main()
+  load_state()
+  display_known_maps()
   table.insert(event_handlers, event.listen("net_msg", msg_recieve))
-  send_scan_request()
+  -- send_scan_request()
   event.pull("interrupted")
   print("interrupted")
   for i, handler in ipairs(event_handlers) do
