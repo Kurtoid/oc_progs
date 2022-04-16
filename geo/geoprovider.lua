@@ -32,7 +32,10 @@ function scan_single_geolyzer(geolyzer)
         local block = scan_result[y]
         if block >0.1 then
           octree:set(x + geo_range, y, z + geo_range, 1)
+        -- else
+        --   octree:set(x + geo_range, y, z + geo_range, 0)
         end
+
       end
 
     end

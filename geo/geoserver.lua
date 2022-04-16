@@ -155,6 +155,7 @@ function a_star(start_pos, end_pos)
       end
       ::continue::
     end
+    os.sleep(0)
   end
   return nil
 end
