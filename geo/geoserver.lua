@@ -6,7 +6,8 @@ local mt = require("minitel")
 local computer = require("computer")
 require("octree")
 
-local geolyzers = {}
+local geolysers = {bounds= {x={nil,nil}, y={nil,nil}, z={nil,nil}},
+                   data= new_octree()}
 
 local BLK_CLEAR = 0
 local BLK_BLOCKED = 1
@@ -32,60 +33,34 @@ function is_point_in_bounds(x, y, z, map)
   end
 end
 
-function get_maps_for_point(x, y, z)
-  local maps = {}
-  for i, geolyzer in ipairs(geolyzers) do
-    local map = geolyzer
-    if is_point_in_bounds(x, y, z, map) then
-      table.insert(maps, map)
-    end
-  end
-  return maps
-end
-
 --- use the availible geolyser data
 function get_block(x, y, z)
   x = math.floor(x)
   y = math.floor(y)
   z = math.floor(z)
-  local maps = get_maps_for_point(x, y, z)
-  if #maps == 0 then
+  -- print(x, y, z)
+  -- print(map['data'][x][z][y])
+  if x == nil or z == nil or y == nil then
     return BLK_UNMAPPED
   end
-  for i, map in ipairs(maps) do
-    local x = x - map['bounds']['x'][1]
-    local y = y - map['bounds']['y'][1]
-    local z = z - map['bounds']['z'][1]
-    -- print(x, y, z)
-    -- print(map['data'][x][z][y])
-    if x == nil or z == nil or y == nil then
-      return BLK_UNMAPPED
-    end
-    local blk = map['data']:get(x, y, z)
+  local blk = geolysers['data']:get(x, y, z)
 
-    if blk ~= BLK_CLEAR and blk ~= nil then
-      return blk
-    end
+  if blk ~= BLK_CLEAR and blk ~= nil then
+    return blk
   end
   return BLK_CLEAR
 end
 
 function clear_block(x, y, z)
-  local maps = get_maps_for_point(x, y, z)
-  if #maps == 0 then
+  local x = x - geolysers['bounds']['x'][1]
+  local y = y - geolysers['bounds']['y'][1]
+  local z = z - geolysers['bounds']['z'][1]
+  -- print(x, y, z)
+  -- print(map['data'][x][z][y])
+  if x == nil or z == nil or y == nil then
     return
   end
-  for i, map in ipairs(maps) do
-    local x = x - map['bounds']['x'][1]
-    local y = y - map['bounds']['y'][1]
-    local z = z - map['bounds']['z'][1]
-    -- print(x, y, z)
-    -- print(map['data'][x][z][y])
-    if x == nil or z == nil or y == nil then
-      return
-    end
-    map['data']:set(x, y, z, BLK_CLEAR)
-  end
+  geolysers['data']:set(x, y, z, BLK_CLEAR)
 end
 
 function manhattan_dist(start_pos, end_pos)
@@ -295,41 +270,36 @@ end
 function add_map(map)
   -- map['data'] is a serialized octree
   map['data'] = new_octree_from_root(map['data'])
-
-  -- check if any geolyser has the same name
-  -- if so, replace it. otherwise, add it
-  local found = false
-  for i, geolyzer in ipairs(geolyzers) do
-    if geolyzer['name'] == map['name'] then
-      geolyzers[i] = map
-      found = true
-      break
-    end
-  end
-  if not found then
-    table.insert(geolyzers, map)
-  end
-  print("total maps: " .. #geolyzers)
-end
-
-function get_known_bounds()
-  local known_bounds = {x = {nil, nil}, y = {nil, nil}, z = {nil, nil}}
-  for i, map in ipairs(geolyzers) do
-    local bounds = map['bounds']
-    -- for each dimension
-    for dim, bounds_dim in pairs(bounds) do
-      -- for each bound
-      for i, bound in ipairs(bounds_dim) do
-        if known_bounds[dim][1] == nil or known_bounds[dim][1] > bound then
-          known_bounds[dim][1] = bound
-        end
-        if known_bounds[dim][2] == nil or known_bounds[dim][2] < bound then
-          known_bounds[dim][2] = bound
-        end
+  -- for each block in map, add it to the octree
+  -- since we don't have a octree join, iterate through the boundary space
+  for x = map['bounds']['x'][1], map['bounds']['x'][2] do
+    for y = map['bounds']['y'][1], map['bounds']['y'][2] do
+      for z = map['bounds']['z'][1], map['bounds']['z'][2] do
+        -- map['data'] is in local coordinates (centered around bounds)
+        -- we need to put these into global coordinates
+        local blk = map['data']:get(x - map['bounds']['x'][1], y - map['bounds']['y'][1], z - map['bounds']['z'][1])
+        geolysers['data']:set(x, y, z, blk)
       end
     end
   end
-  return known_bounds
+
+  -- update the bounds
+  -- for each dimension
+  for dim, bounds in pairs(map['bounds']) do
+    -- for each bound
+    for i, bound in ipairs(bounds) do
+      if geolysers['bounds'][dim][1] == nil or geolysers['bounds'][dim][1] > bound then
+        geolysers['bounds'][dim][1] = bound
+      end
+      if geolysers['bounds'][dim][2] == nil or geolysers['bounds'][dim][2] < bound then
+        geolysers['bounds'][dim][2] = bound
+      end
+    end
+  end
+end
+
+function get_known_bounds()
+  return geolysers['bounds']
 end
 
 -- BEGIN HOLO FUNCTIONS
@@ -366,35 +336,6 @@ function display_known_maps()
   end
 end
 
-
-function load_state()
-  -- read from GEO_DATA.dat, if it exists
-  local file = io.open('GEO_DATA.dat', 'r')
-  if file then
-    local serialized_geolysers = file:read("*a")
-    file:close()
-    geolyzers = ser.unserialize(serialized_geolysers)
-    if geolyzers == nil then
-      geolyzers = {}
-    else
-      for i, map in ipairs(geolyzers) do
-        map['data'] = new_octree_from_root(map['data'])
-      end
-    end
-    print("read state from file")
-  end
-end
-
-function save_state()
-  -- write to GEO_DATA.dat
-  local file = io.open('GEO_DATA.dat', 'w')
-  if file then
-    print("writing state to file")
-    file:write(ser.serialize(geolyzers))
-    file:close()
-    print("wrote state to file")
-  end
-end
 
 function pathfinding_demo()
   local bounds = get_known_bounds()
@@ -437,7 +378,6 @@ function read_block_stream(from)
   print('closed stream')
   local packet = ser.unserialize(message)
   add_map(packet['map'])
-  -- save_state()
   display_known_maps()
   -- pathfinding_demo()
 end
@@ -504,8 +444,7 @@ end
  
 local event_handlers = {}
 function main()
-  load_state()
-  display_known_maps()
+  -- display_known_maps()
   table.insert(event_handlers, event.listen("net_msg", msg_recieve))
   -- send_scan_request()
   event.pull("interrupted")
