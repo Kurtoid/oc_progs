@@ -157,7 +157,7 @@ function a_star(start_pos, end_pos)
     end
     os.sleep(0)
   end
-  return nil
+  return {}
 end
 -- END A STAR CODE --
 
@@ -200,6 +200,7 @@ function top_block_for_xz(x, z)
   end
 end
 
+-- TODO: add start position as an argument
 function nearest_neighbor_tsp(top_blocks)
   local path = {}
   local visited = {}
@@ -416,6 +417,64 @@ function handle_nav_request(packet, from)
   print("path sent to ", from, ": ", #path)
 end
 
+function handle_tsp_request(packet, from)
+  local corner1 = packet['corner1']
+  local corner2 = packet['corner2']
+  local path = nil
+  -- make a bounds object from the corners. ensure that x[1] < x[2], y[1] < y[2], and z[1] < z[2]
+  local bounds = {x = {corner1.x, corner2.x}, y = {corner1.y, corner2.y}, z = {corner1.z, corner2.z}}
+  for dim in pairs(bounds) do
+    if bounds[dim][1] > bounds[dim][2] then
+      local bound = bounds[dim][1]
+      bounds[dim][1] = bounds[dim][2]
+      bounds[dim][2] = bound
+    end
+  end
+  -- replace y bounds with the global y bounds
+  local global_bounds = get_known_bounds()
+  bounds.y = {global_bounds.y[1], global_bounds.y[2]}
+  -- get the top blocks for the bounds
+  local top_blocks = top_blocks_for_bounds(bounds)
+  print("top blocks: ", #top_blocks)
+  local start_pos = packet['start_pos']
+  local robot_pos = {start_pos.x, start_pos.y, start_pos.z}
+  -- clear the robot's position
+  clear_block(start_pos.x, start_pos.y, start_pos.z)
+  path = nearest_neighbor_tsp(top_blocks)
+  path = fill_path(path)
+  -- combine the filled paths into a single path
+  local new_path = {}
+  for path_index, path in ipairs(path) do
+    for i, block in ipairs(path) do
+      table.insert(new_path, block)
+    end
+  end
+  path = new_path
+  -- note that the first position in the returned path is NOT the robot's position
+  -- pathfind from the robot's position to the first position in the path
+  local first_pos = path[1]
+  print("planning from ", robot_pos[1], robot_pos[2], robot_pos[3], " to ", first_pos[1], first_pos[2], first_pos[3])
+  local init_path = a_star(robot_pos, first_pos)
+  -- add path to the end of the initial path
+  for i, pos in ipairs(path) do
+    table.insert(init_path, pos)
+  end
+  path = init_path
+    -- TODO: convert stream send to a function
+  -- the path could be very large, so send it over a stream
+  -- the client should be listening
+  local stream = mt.open(from, 3)
+  if stream == nil then
+    print('could not open stream to ', from)
+  end
+  local message = ser.serialize({path = path})
+  message = message .. 'EOF'
+  stream:write(message)
+  stream:close()
+  print("path sent to ", from, ": ", #path)
+end
+
+
 local host_packets = {}
 function msg_recieve(_, from, port, data)
   xpcall(function()
@@ -429,6 +488,9 @@ function msg_recieve(_, from, port, data)
       end
       if packet['type'] == 'nav_request' then
         handle_nav_request(packet, from)
+      end
+      if packet['type'] == 'tsp_request' then
+        handle_tsp_request(packet, from)
       end
     end
   end, function(err)

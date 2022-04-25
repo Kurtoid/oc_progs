@@ -112,6 +112,35 @@ function netmove:getpath(start, stop)
   return message
 end
 
+function netmove:gettsp(position, corner1, corner2)
+  local message = {type='tsp_request', corner1=corner1, corner2=corner2, start_pos = position}
+  local message_str = ser.serialize(message)
+  mt.rsend("geo_server", 2, message_str)
+  -- wait for a stream
+  local stream = mt.listen(3)
+  -- TODO: move chunk recieving to a function
+  -- the path will be in multiple chunks, ending with an EOF
+  local message = ''
+  local chunk = ''
+  while true do
+    chunk = stream:read("*a")
+    os.sleep()
+    message = message .. chunk
+    -- check if the last 3 characters are 'EOF'
+    if #message >= 3 and string.sub(message, #message - 2, #message) == 'EOF' then
+      -- remove the 'EOF'
+      message = message:sub(1, #message - 3)
+      -- exit loop
+      break
+    end
+  end
+  -- close the stream
+  stream:close()
+  -- deserialize the message
+  local message = ser.unserialize(message)
+  return message
+end
+
 function manhattan_dist(p1, p2)
   return math.abs(p1.x - p2.x) + math.abs(p1.y - p2.y) + math.abs(p1.z - p2.z)
 end
